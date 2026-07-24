@@ -31,9 +31,9 @@ gamified with streaks and scores, monetized by subscription.
 
 ## Getting started
 
-1. **Create a Supabase project** → SQL Editor → run, in order:
-   - `supabase/migrations/0001_init.sql`
-   - `supabase/migrations/0002_storage.sql`
+1. **Create a Supabase project** → SQL Editor → run:
+   - `supabase/migrations/0001_init.sql` (one consolidated, idempotent file —
+     tables, RLS, triggers, RPCs, storage bucket; safe to re-run)
    - `supabase/seed.sql` (optional starter products)
 2. **Auth settings** (Supabase → Authentication):
    - Enable **Email (magic link)** and **Google** providers.

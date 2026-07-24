@@ -1,7 +1,12 @@
 -- =============================================================================
--- GlowOS — initial schema + Row Level Security
+-- GlowOS — consolidated schema + Row Level Security (v2, idempotent)
 -- =============================================================================
--- SECURITY MODEL (read this before touching anything):
+-- Safe to re-run from scratch: every statement is IF NOT EXISTS / OR REPLACE /
+-- drop-then-create. Strict ordering: extensions → enums → TABLES → indexes →
+-- helper functions (anything that references a table comes AFTER all tables) →
+-- RLS enable → policies → triggers → RPCs → storage bucket.
+--
+-- SECURITY MODEL:
 --   * RLS is ON for EVERY table and DENY-BY-DEFAULT. A table with RLS enabled
 --     and no matching policy returns zero rows / rejects writes.
 --   * Users may only ever touch their OWN rows: user_id = auth.uid().
@@ -12,12 +17,15 @@
 --   * products are world-readable (active only) and admin-writable.
 --   * The anon key is safe to expose ONLY because these policies are airtight.
 --     supabase/tests/rls.test.ts proves cross-user access fails.
+--   * The SQL-editor role (postgres, table owner) is NOT subject to RLS here,
+--     so dashboard seeding/administration keeps working; the service role has
+--     BYPASSRLS. Anon and authenticated users are fully policy-bound.
 -- =============================================================================
 
 create extension if not exists "pgcrypto";      -- gen_random_uuid()
 
 -- -----------------------------------------------------------------------------
--- Enums
+-- 1. Enums
 -- -----------------------------------------------------------------------------
 do $$ begin
   create type budget_tier as enum ('t500', 't1500', 't5000');
@@ -35,24 +43,8 @@ do $$ begin
   create type sub_status as enum ('active', 'halted', 'cancelled', 'expired', 'created', 'pending');
 exception when duplicate_object then null; end $$;
 
--- -----------------------------------------------------------------------------
--- Helper: is_admin() — SECURITY DEFINER avoids recursive RLS on profiles.
--- -----------------------------------------------------------------------------
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'admin'
-  );
-$$;
-
 -- =============================================================================
--- TABLES
+-- 2. TABLES (all created before any function/policy references them)
 -- =============================================================================
 
 -- profiles ---------------------------------------------------------------------
@@ -81,8 +73,6 @@ create table if not exists public.blueprints (
   model_used  text not null default 'rules-v1',
   created_at  timestamptz not null default now()
 );
-create index if not exists blueprints_user_created_idx
-  on public.blueprints (user_id, created_at desc);
 
 -- polish_scores ----------------------------------------------------------------
 create table if not exists public.polish_scores (
@@ -97,8 +87,6 @@ create table if not exists public.polish_scores (
   total       int  not null check (total between 0 and 100),
   computed_at timestamptz not null default now()
 );
-create index if not exists polish_scores_user_idx
-  on public.polish_scores (user_id, computed_at desc);
 
 -- daily_actions ----------------------------------------------------------------
 create table if not exists public.daily_actions (
@@ -114,8 +102,6 @@ create table if not exists public.daily_actions (
   done_at     timestamptz,
   created_at  timestamptz not null default now()
 );
-create index if not exists daily_actions_user_date_idx
-  on public.daily_actions (user_id, action_date);
 
 -- streaks ----------------------------------------------------------------------
 create table if not exists public.streaks (
@@ -138,7 +124,6 @@ create table if not exists public.subscriptions (
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
-create index if not exists subscriptions_user_idx on public.subscriptions (user_id);
 
 -- payments ---------------------------------------------------------------------
 create table if not exists public.payments (
@@ -151,7 +136,6 @@ create table if not exists public.payments (
   raw_webhook          jsonb,                  -- dispute audit trail
   created_at           timestamptz not null default now()
 );
-create index if not exists payments_user_idx on public.payments (user_id);
 
 -- products (founder-curated; AI may only reference these) ----------------------
 create table if not exists public.products (
@@ -164,8 +148,6 @@ create table if not exists public.products (
   active        boolean not null default true,
   created_at    timestamptz not null default now()
 );
-create index if not exists products_module_tier_idx
-  on public.products (module, budget_tier) where active;
 
 -- voice_logs (Phase 3) ---------------------------------------------------------
 create table if not exists public.voice_logs (
@@ -178,7 +160,6 @@ create table if not exists public.voice_logs (
   score        int check (score between 0 and 100),
   created_at   timestamptz not null default now()
 );
-create index if not exists voice_logs_user_idx on public.voice_logs (user_id, created_at desc);
 
 -- audit_log (service-role writes only; IPs are hashed, never raw) --------------
 create table if not exists public.audit_log (
@@ -189,108 +170,40 @@ create table if not exists public.audit_log (
   meta       jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- -----------------------------------------------------------------------------
+-- 3. Indexes
+-- -----------------------------------------------------------------------------
+create index if not exists blueprints_user_created_idx
+  on public.blueprints (user_id, created_at desc);
+create index if not exists polish_scores_user_idx
+  on public.polish_scores (user_id, computed_at desc);
+create index if not exists daily_actions_user_date_idx
+  on public.daily_actions (user_id, action_date);
+create index if not exists subscriptions_user_idx on public.subscriptions (user_id);
+create index if not exists payments_user_idx on public.payments (user_id);
+create index if not exists products_module_tier_idx
+  on public.products (module, budget_tier) where active;
+create index if not exists voice_logs_user_idx on public.voice_logs (user_id, created_at desc);
 create index if not exists audit_log_user_idx on public.audit_log (user_id, created_at desc);
 
 -- =============================================================================
--- ROW LEVEL SECURITY — enable + deny-by-default on EVERY table
+-- 4. Helper functions (AFTER tables — bodies reference public.profiles etc.)
 -- =============================================================================
-alter table public.profiles      enable row level security;
-alter table public.blueprints    enable row level security;
-alter table public.polish_scores enable row level security;
-alter table public.daily_actions enable row level security;
-alter table public.streaks       enable row level security;
-alter table public.subscriptions enable row level security;
-alter table public.payments      enable row level security;
-alter table public.products      enable row level security;
-alter table public.voice_logs    enable row level security;
-alter table public.audit_log     enable row level security;
 
--- force RLS even for the table owner (defense in depth).
-alter table public.profiles      force row level security;
-alter table public.blueprints    force row level security;
-alter table public.polish_scores force row level security;
-alter table public.daily_actions force row level security;
-alter table public.streaks       force row level security;
-alter table public.subscriptions force row level security;
-alter table public.payments      force row level security;
-alter table public.products      force row level security;
-alter table public.voice_logs    force row level security;
-alter table public.audit_log     force row level security;
-
--- -----------------------------------------------------------------------------
--- profiles: owner read/insert/update. NO user delete. Admin may read all.
--- -----------------------------------------------------------------------------
-create policy "profiles_select_own" on public.profiles
-  for select using (id = auth.uid());
-create policy "profiles_insert_own" on public.profiles
-  for insert with check (id = auth.uid());
-create policy "profiles_update_own" on public.profiles
-  for update using (id = auth.uid())
-  with check (id = auth.uid() and role = 'user');  -- users can never self-promote to admin
-create policy "profiles_admin_read_all" on public.profiles
-  for select using (public.is_admin());
-
--- -----------------------------------------------------------------------------
--- Owner-only user tables: select/insert/update own rows; no delete policy.
--- -----------------------------------------------------------------------------
-create policy "blueprints_rw_own" on public.blueprints
-  for select using (user_id = auth.uid());
-create policy "blueprints_insert_own" on public.blueprints
-  for insert with check (user_id = auth.uid());
-
-create policy "polish_select_own" on public.polish_scores
-  for select using (user_id = auth.uid());
-create policy "polish_insert_own" on public.polish_scores
-  for insert with check (user_id = auth.uid());
-
-create policy "actions_select_own" on public.daily_actions
-  for select using (user_id = auth.uid());
-create policy "actions_insert_own" on public.daily_actions
-  for insert with check (user_id = auth.uid());
-create policy "actions_update_own" on public.daily_actions
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-create policy "streaks_select_own" on public.streaks
-  for select using (user_id = auth.uid());
-create policy "streaks_insert_own" on public.streaks
-  for insert with check (user_id = auth.uid());
-create policy "streaks_update_own" on public.streaks
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-create policy "voice_select_own" on public.voice_logs
-  for select using (user_id = auth.uid());
-create policy "voice_insert_own" on public.voice_logs
-  for insert with check (user_id = auth.uid());
-
--- -----------------------------------------------------------------------------
--- subscriptions / payments: owner read-only. Writes only via service role
--- (service role BYPASSES RLS, so we intentionally add NO insert/update policy).
--- -----------------------------------------------------------------------------
-create policy "subscriptions_select_own" on public.subscriptions
-  for select using (user_id = auth.uid());
-
-create policy "payments_select_own" on public.payments
-  for select using (user_id = auth.uid());
-
--- audit_log: owner may read own; writes only via service role (no write policy).
-create policy "audit_select_own" on public.audit_log
-  for select using (user_id = auth.uid());
-
--- -----------------------------------------------------------------------------
--- products: anyone may read ACTIVE rows; only admins may write.
--- -----------------------------------------------------------------------------
-create policy "products_read_active" on public.products
-  for select using (active = true or public.is_admin());
-create policy "products_admin_insert" on public.products
-  for insert with check (public.is_admin());
-create policy "products_admin_update" on public.products
-  for update using (public.is_admin()) with check (public.is_admin());
-create policy "products_admin_delete" on public.products
-  for delete using (public.is_admin());
-
--- =============================================================================
--- TRIGGERS
--- =============================================================================
+-- is_admin(): SECURITY DEFINER avoids recursive RLS on profiles.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'admin'
+  );
+$$;
 
 -- keep updated_at fresh.
 create or replace function public.touch_updated_at()
@@ -299,13 +212,6 @@ begin
   new.updated_at = now();
   return new;
 end; $$;
-
-create trigger profiles_touch before update on public.profiles
-  for each row execute function public.touch_updated_at();
-create trigger subscriptions_touch before update on public.subscriptions
-  for each row execute function public.touch_updated_at();
-create trigger streaks_touch before update on public.streaks
-  for each row execute function public.touch_updated_at();
 
 -- On new auth user, create a profile + streak row so the client never needs
 -- INSERT rights it could abuse. Runs as definer.
@@ -324,13 +230,149 @@ begin
   return new;
 end; $$;
 
+-- =============================================================================
+-- 5. ROW LEVEL SECURITY — enable on EVERY table (deny-by-default)
+-- =============================================================================
+alter table public.profiles      enable row level security;
+alter table public.blueprints    enable row level security;
+alter table public.polish_scores enable row level security;
+alter table public.daily_actions enable row level security;
+alter table public.streaks       enable row level security;
+alter table public.subscriptions enable row level security;
+alter table public.payments      enable row level security;
+alter table public.products      enable row level security;
+alter table public.voice_logs    enable row level security;
+alter table public.audit_log     enable row level security;
+
+-- -----------------------------------------------------------------------------
+-- 6. Policies (drop-then-create so the file is safely re-runnable)
+-- -----------------------------------------------------------------------------
+
+-- profiles: owner read/insert/update. NO user delete. Admin may read all.
+drop policy if exists "profiles_select_own" on public.profiles;
+create policy "profiles_select_own" on public.profiles
+  for select using (id = auth.uid());
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own" on public.profiles
+  for insert with check (id = auth.uid());
+
+drop policy if exists "profiles_update_own" on public.profiles;
+create policy "profiles_update_own" on public.profiles
+  for update using (id = auth.uid())
+  with check (id = auth.uid() and role = 'user');  -- users can never self-promote to admin
+
+drop policy if exists "profiles_admin_read_all" on public.profiles;
+create policy "profiles_admin_read_all" on public.profiles
+  for select using (public.is_admin());
+
+-- blueprints: owner select/insert; no update/delete.
+drop policy if exists "blueprints_rw_own" on public.blueprints;
+create policy "blueprints_rw_own" on public.blueprints
+  for select using (user_id = auth.uid());
+
+drop policy if exists "blueprints_insert_own" on public.blueprints;
+create policy "blueprints_insert_own" on public.blueprints
+  for insert with check (user_id = auth.uid());
+
+-- polish_scores: owner select/insert; no update/delete.
+drop policy if exists "polish_select_own" on public.polish_scores;
+create policy "polish_select_own" on public.polish_scores
+  for select using (user_id = auth.uid());
+
+drop policy if exists "polish_insert_own" on public.polish_scores;
+create policy "polish_insert_own" on public.polish_scores
+  for insert with check (user_id = auth.uid());
+
+-- daily_actions: owner select/insert/update (check-off); no delete.
+drop policy if exists "actions_select_own" on public.daily_actions;
+create policy "actions_select_own" on public.daily_actions
+  for select using (user_id = auth.uid());
+
+drop policy if exists "actions_insert_own" on public.daily_actions;
+create policy "actions_insert_own" on public.daily_actions
+  for insert with check (user_id = auth.uid());
+
+drop policy if exists "actions_update_own" on public.daily_actions;
+create policy "actions_update_own" on public.daily_actions
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- streaks: owner select/insert/update; no delete.
+drop policy if exists "streaks_select_own" on public.streaks;
+create policy "streaks_select_own" on public.streaks
+  for select using (user_id = auth.uid());
+
+drop policy if exists "streaks_insert_own" on public.streaks;
+create policy "streaks_insert_own" on public.streaks
+  for insert with check (user_id = auth.uid());
+
+drop policy if exists "streaks_update_own" on public.streaks;
+create policy "streaks_update_own" on public.streaks
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- voice_logs: owner select/insert; no update/delete.
+drop policy if exists "voice_select_own" on public.voice_logs;
+create policy "voice_select_own" on public.voice_logs
+  for select using (user_id = auth.uid());
+
+drop policy if exists "voice_insert_own" on public.voice_logs;
+create policy "voice_insert_own" on public.voice_logs
+  for insert with check (user_id = auth.uid());
+
+-- subscriptions / payments: owner READ-ONLY. Writes only via service role,
+-- which has BYPASSRLS — so we intentionally add NO insert/update policy.
+drop policy if exists "subscriptions_select_own" on public.subscriptions;
+create policy "subscriptions_select_own" on public.subscriptions
+  for select using (user_id = auth.uid());
+
+drop policy if exists "payments_select_own" on public.payments;
+create policy "payments_select_own" on public.payments
+  for select using (user_id = auth.uid());
+
+-- audit_log: owner may read own; writes only via service role (no write policy).
+drop policy if exists "audit_select_own" on public.audit_log;
+create policy "audit_select_own" on public.audit_log
+  for select using (user_id = auth.uid());
+
+-- products: anyone may read ACTIVE rows; only admins may write.
+drop policy if exists "products_read_active" on public.products;
+create policy "products_read_active" on public.products
+  for select using (active = true or public.is_admin());
+
+drop policy if exists "products_admin_insert" on public.products;
+create policy "products_admin_insert" on public.products
+  for insert with check (public.is_admin());
+
+drop policy if exists "products_admin_update" on public.products;
+create policy "products_admin_update" on public.products
+  for update using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists "products_admin_delete" on public.products;
+create policy "products_admin_delete" on public.products
+  for delete using (public.is_admin());
+
+-- -----------------------------------------------------------------------------
+-- 7. Triggers (drop-then-create)
+-- -----------------------------------------------------------------------------
+drop trigger if exists profiles_touch on public.profiles;
+create trigger profiles_touch before update on public.profiles
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists subscriptions_touch on public.subscriptions;
+create trigger subscriptions_touch before update on public.subscriptions
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists streaks_touch on public.streaks;
+create trigger streaks_touch before update on public.streaks
+  for each row execute function public.touch_updated_at();
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
 -- =============================================================================
--- ONE-TAP HARD DELETE (Delete my data) — SECURITY DEFINER RPC
+-- 8. ONE-TAP HARD DELETE (Delete my data) — SECURITY DEFINER RPC
 -- =============================================================================
 -- Deletes every row the caller owns AND their storage objects, then removes the
 -- auth user. Callable only by an authenticated user, and only ever affects the
@@ -391,3 +433,31 @@ $$;
 
 revoke all on function public.export_my_data() from public, anon;
 grant execute on function public.export_my_data() to authenticated;
+
+-- =============================================================================
+-- 9. Storage: private bucket for voice clips (Phase 3), locked down now.
+-- =============================================================================
+-- Bucket is PRIVATE — access only via short-lived signed URLs. Paths are
+-- randomized {uuid}/{uuid}.webm and owned by the uploader.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'voice',
+  'voice',
+  false,
+  10485760,  -- 10 MB
+  array['audio/webm', 'audio/mp4', 'audio/wav']
+)
+on conflict (id) do nothing;
+
+-- Users may only touch objects they own, inside the voice bucket.
+drop policy if exists "voice_read_own" on storage.objects;
+create policy "voice_read_own" on storage.objects
+  for select using (bucket_id = 'voice' and owner = auth.uid());
+
+drop policy if exists "voice_insert_own" on storage.objects;
+create policy "voice_insert_own" on storage.objects
+  for insert with check (bucket_id = 'voice' and owner = auth.uid());
+
+drop policy if exists "voice_delete_own" on storage.objects;
+create policy "voice_delete_own" on storage.objects
+  for delete using (bucket_id = 'voice' and owner = auth.uid());
