@@ -40,27 +40,50 @@ const limiters = {
 
 export type LimiterName = keyof typeof limiters;
 
+// Fail posture when Redis is unreachable/unconfigured:
+//  - CLOSED for endpoints where an unmetered request costs money or security
+//    (AI spend, auth abuse, storage uploads).
+//  - OPEN for the cheap product-critical paths (quiz submit, global) — a
+//    misconfigured Redis must not brick the free funnel; the endpoint is still
+//    Zod-validated and cheap. Every fail-open is logged loudly so it shows up
+//    in Vercel logs / Sentry rather than silently degrading.
+const FAIL_CLOSED: Record<LimiterName, boolean> = {
+  global: false,
+  quiz: false,
+  auth: true,
+  aiFree: true,
+  aiPaid: true,
+  voice: true,
+};
+
 export interface LimitResult {
   ok: boolean;
   remaining: number;
 }
 
-/**
- * Check a named limiter for an identifier (IP or user id).
- * Sensitive limiters fail CLOSED in production when Redis is unavailable.
- */
+/** Check a named limiter for an identifier (IP or user id). */
 export async function checkLimit(name: LimiterName, id: string): Promise<LimitResult> {
   const limiter = limiters[name];
   if (!limiter) {
     if (process.env.NODE_ENV === "production") {
-      // No Redis in prod: allow only the broad global limiter, block the rest.
-      return { ok: name === "global", remaining: 0 };
+      console.error(
+        `[rate-limit] MISCONFIGURATION: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN ` +
+          `not set — '${name}' ${FAIL_CLOSED[name] ? "BLOCKED (fail-closed)" : "allowed (fail-open)"}. ` +
+          `Create an Upstash Redis DB and set both env vars.`
+      );
+      return { ok: !FAIL_CLOSED[name], remaining: 0 };
     }
     console.warn(`[rate-limit] Upstash not configured — '${name}' allowed in dev`);
     return { ok: true, remaining: 999 };
   }
-  const { success, remaining } = await limiter.limit(id);
-  return { ok: success, remaining };
+  try {
+    const { success, remaining } = await limiter.limit(id);
+    return { ok: success, remaining };
+  } catch (err) {
+    // Redis outage mid-flight: same posture as unconfigured, loudly.
+    console.error(`[rate-limit] Redis error on '${name}' — applying fail posture`, err);
+    return { ok: !FAIL_CLOSED[name], remaining: 0 };
+  }
 }
 
 /** Best-effort client IP for rate limiting (Vercel sets x-forwarded-for). */
