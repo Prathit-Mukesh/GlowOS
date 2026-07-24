@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -20,7 +21,13 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Nonce-based CSP requires dynamic rendering: a statically prerendered page
+  // cannot contain a per-request nonce, so its scripts get blocked (blank
+  // /quiz bug). Reading headers() opts every route out of prerendering, and
+  // Next then stamps the nonce from the proxy's CSP request header onto all
+  // of its script tags.
+  await headers();
   return (
     <html lang="en" className={inter.variable}>
       <body className="min-h-dvh">
