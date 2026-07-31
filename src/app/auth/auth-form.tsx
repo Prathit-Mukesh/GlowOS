@@ -9,6 +9,40 @@ import { createClient } from "@/lib/supabase/client";
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
 
 /**
+ * Turn a Supabase auth error into a message that is useful without being an
+ * account-enumeration oracle.
+ *
+ * The spec's "generic errors" rule exists to stop an attacker learning whether
+ * an email is registered. None of the branches below reveal that: a config
+ * error, a rate limit or a network failure produces the SAME message for a
+ * registered and an unregistered address. What the old blanket message did
+ * instead was hide operational faults from us — a misconfigured key and an
+ * exhausted email quota looked identical, and neither was actionable.
+ */
+function authErrorMessage(error: { message?: string; status?: number; code?: string }): string {
+  const code = error.code ?? "";
+  const msg = (error.message ?? "").toLowerCase();
+
+  // Always log the real error — it's already visible in the network tab, and
+  // it's what makes a screenshot of this screen diagnosable.
+  console.error("[auth] sign-in failed", error);
+
+  if (code === "over_email_send_rate_limit" || error.status === 429 || msg.includes("rate limit")) {
+    return "Too many sign-in emails from this address just now. Please wait a few minutes and try again.";
+  }
+  if (error.status === 401 || msg.includes("invalid api key")) {
+    return "Sign-in isn't configured correctly on our side (auth key). We've been alerted — please try again shortly.";
+  }
+  if (msg.includes("redirect") || msg.includes("not allowed") || error.status === 422) {
+    return "Sign-in isn't configured correctly on our side (redirect URL). We've been alerted — please try again shortly.";
+  }
+  if (msg.includes("failed to fetch") || msg.includes("network")) {
+    return "Couldn't reach our servers — check your connection and try again.";
+  }
+  return "Couldn't send the link right now. Please try again in a minute.";
+}
+
+/**
  * Passwordless auth only: email magic link + Google OAuth. No passwords in v1
  * = no credential-stuffing surface. 18+ age gate is required before either
  * method proceeds and is recorded on first sign-in (see /auth/callback).
@@ -59,8 +93,7 @@ export default function AuthForm() {
       options: { emailRedirectTo: callbackUrl() },
     });
     if (error) {
-      // Generic message — never reveal whether the account exists.
-      setMessage("Couldn't send the link right now. Please try again in a minute.");
+      setMessage(authErrorMessage(error));
       setState("error");
       return;
     }
@@ -75,10 +108,16 @@ export default function AuthForm() {
       return;
     }
     const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: callbackUrl() },
     });
+    // Previously this error was discarded entirely, so a failed Google sign-in
+    // looked like nothing had happened at all.
+    if (error) {
+      setMessage(authErrorMessage(error));
+      setState("error");
+    }
   }
 
   return (
