@@ -81,7 +81,7 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-bold">Your five modules</h2>
           {!isPaid ? (
-            <Link href="/#pricing" className="text-xs font-semibold text-gold-soft">
+            <Link href="/pricing" className="text-xs font-semibold text-gold-soft">
               Unlock all →
             </Link>
           ) : null}
@@ -160,7 +160,7 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
                     This module is part of <strong className="text-gold-soft">Glow Pass</strong> —
                     ₹199/mo unlocks all five.
                   </p>
-                  <Link href="/#pricing" className="btn-primary mt-3 w-full">
+                  <Link href="/pricing" className="btn-primary mt-3 w-full">
                     Unlock everything
                   </Link>
                 </div>

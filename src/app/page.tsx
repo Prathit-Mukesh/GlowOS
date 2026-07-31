@@ -96,7 +96,12 @@ export default function LandingPage() {
 
       {/* Pricing */}
       <section className="flex flex-col gap-4" id="pricing">
-        <h2 className="text-2xl font-bold">Simple pricing</h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-2xl font-bold">Simple pricing</h2>
+          <Link href="/pricing" className="text-xs font-semibold text-violet-soft">
+            Full details →
+          </Link>
+        </div>
         <div className="card border-violet/30">
           <div className="flex items-baseline justify-between">
             <h3 className="text-lg font-bold">Glow Pass</h3>
@@ -146,6 +151,9 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="mt-4 border-t border-white/5 pt-6 text-center text-xs text-slate-500">
         <nav className="mb-3 flex justify-center gap-5">
+          <Link href="/pricing" className="hover:text-slate-300">
+            Pricing
+          </Link>
           <Link href="/privacy" className="hover:text-slate-300">
             Privacy
           </Link>

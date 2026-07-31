@@ -62,9 +62,14 @@ export default async function DashboardPage() {
           <p className="text-sm text-slate-400">Good to see you,</p>
           <h1 className="text-2xl font-extrabold">{profile?.display_name ?? "Glow-getter"} ✨</h1>
         </div>
-        <Link href="/blueprint" className="text-xs font-semibold text-violet-soft">
-          Blueprint →
-        </Link>
+        <nav className="flex items-center gap-4">
+          <Link href="/blueprint" className="text-xs font-semibold text-violet-soft">
+            Blueprint →
+          </Link>
+          <Link href="/settings" aria-label="Settings" className="text-lg text-slate-500 hover:text-slate-300">
+            ⚙
+          </Link>
+        </nav>
       </header>
 
       <section className="grid grid-cols-2 gap-4">

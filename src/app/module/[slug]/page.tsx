@@ -70,7 +70,7 @@ export default async function ModulePage({ params }: Props) {
           Your free plan includes <strong>{MODULE_META[unlockedModule].label}</strong>. Glow Pass
           (₹199/mo) unlocks all five modules.
         </p>
-        <Link href="/#pricing" className="btn-primary w-full">
+        <Link href="/pricing" className="btn-primary w-full">
           Unlock everything
         </Link>
         <Link href="/blueprint" className="btn-ghost w-full">
