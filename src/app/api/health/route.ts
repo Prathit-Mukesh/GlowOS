@@ -27,11 +27,13 @@ export async function GET() {
   checks.supabase_url_set = url ? "ok" : "MISSING";
   checks.anon_key_set = anon ? "ok" : "MISSING";
   checks.service_key_set = process.env.SUPABASE_SERVICE_ROLE_KEY ? "ok" : "MISSING";
-  checks.anthropic_key_set = process.env.ANTHROPIC_API_KEY ? "ok" : "missing (AI plans fall back to rules)";
+  checks.anthropic_key_set = process.env.ANTHROPIC_API_KEY
+    ? "ok"
+    : "MISSING — no AI plans; every user gets the rules-based plan instead";
   checks.upstash_set =
     process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
       ? "ok"
-      : "missing (rate limiting degraded)";
+      : "missing — rate limiting degraded (AI still capped in the database)";
 
   // 2. Does the anon key actually authenticate? This is the check that would
   //    have identified the sign-in outage immediately.

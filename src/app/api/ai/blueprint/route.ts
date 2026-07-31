@@ -36,9 +36,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 
-    // Regen cap: max 2 AI regenerations per day per user (rules rows excluded).
+    // ---- Database-backed daily caps (the REAL spend control) --------------
+    // These run in Postgres, so they hold even when Redis is unreachable —
+    // which is exactly why the AI limiter above can safely fail open.
     const dayStart = new Date();
     dayStart.setUTCHours(0, 0, 0, 0);
+
+    const { count: totalToday } = await supabase
+      .from("blueprints")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", dayStart.toISOString());
+
+    // Backstop: counts EVERY blueprint row written today, including the rules
+    // rows produced by a failed AI attempt. Without this, a user whose
+    // generations kept failing could retry indefinitely and still burn tokens
+    // on each attempt, because failures never increment the AI-only counter.
+    if ((totalToday ?? 0) >= 8) {
+      return NextResponse.json(
+        { error: "Daily plan limit reached — try again tomorrow" },
+        { status: 429 }
+      );
+    }
+
+    // Max 2 successful AI regenerations per day per user (rules rows excluded).
     const { count } = await supabase
       .from("blueprints")
       .select("id", { count: "exact", head: true })

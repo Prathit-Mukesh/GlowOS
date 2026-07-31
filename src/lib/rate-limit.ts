@@ -51,8 +51,15 @@ const FAIL_CLOSED: Record<LimiterName, boolean> = {
   global: false,
   quiz: false,
   auth: true,
-  aiFree: true,
-  aiPaid: true,
+  // AI fails OPEN, deliberately. The real spend control for AI generation is
+  // the per-day cap enforced in Postgres (see /api/ai/blueprint), which does
+  // not depend on Redis being reachable. Failing closed here achieved nothing
+  // except disabling the feature entirely whenever Upstash was unset — the
+  // cost ceiling stayed exactly the same either way.
+  aiFree: false,
+  aiPaid: false,
+  // Voice uploads stay fail-closed: unmetered writes to storage have no
+  // equivalent database-side ceiling.
   voice: true,
 };
 
