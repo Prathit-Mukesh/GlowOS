@@ -19,7 +19,7 @@ export default function PrivacyPage() {
           <li>Your quiz answers: age band, presentation, goals, budget tier, daily time, diet, fitness level, skincare habit, speaking confidence, patience, upcoming event, and an optional short note.</li>
           <li>Your plans, scores, streaks and check-ins as you use the app.</li>
           <li>Voice clips, only if you use the Voice module — kept a maximum of 30 days.</li>
-          <li>Payment records via Razorpay. Card/UPI details never touch our servers.</li>
+          <li>Nothing about payments — GlowOS is free, so we collect no card or UPI details at all.</li>
         </ul>
         <p>That’s the whole list. We collect nothing else, and we add nothing without a reason.</p>
       </section>

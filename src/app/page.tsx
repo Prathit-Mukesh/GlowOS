@@ -30,7 +30,7 @@ const faqs = [
   },
   {
     q: "What does it cost?",
-    a: "The quiz and one full module are free forever. Glow Pass unlocks all five modules for ₹199/month or ₹1,499/year. A one-time full Blueprint is ₹499.",
+    a: "Nothing. GlowOS is completely free while we're in early access — all five modules, your full AI plan, no card required. If we ever add paid plans, we'll tell you first.",
   },
   {
     q: "What happens to my data?",
@@ -94,35 +94,21 @@ export default function LandingPage() {
         ))}
       </section>
 
-      {/* Pricing */}
+      {/* Pricing — free for all during early access */}
       <section className="flex flex-col gap-4" id="pricing">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-2xl font-bold">Simple pricing</h2>
+          <h2 className="text-2xl font-bold">Pricing</h2>
           <Link href="/pricing" className="text-xs font-semibold text-violet-soft">
-            Full details →
+            Details →
           </Link>
         </div>
-        <div className="card border-violet/30">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-lg font-bold">Glow Pass</h3>
-            <p className="text-right">
-              <span className="text-2xl font-extrabold text-gold-soft">₹199</span>
-              <span className="text-sm text-slate-400">/mo</span>
-            </p>
-          </div>
-          <p className="mt-1 text-sm text-slate-400">
-            All 5 modules, weekly refreshed plans, streak pet, voice scoring. ₹1,499/yr (save 37%).
+        <div className="card border-teal/40 text-center">
+          <span className="chip border-teal/40 text-teal-soft">Early access</span>
+          <p className="mt-3 text-4xl font-extrabold text-teal-soft">Free</p>
+          <p className="mt-2 text-sm text-slate-300">
+            All five modules, your full AI plan, daily actions and streaks — open to everyone, no
+            card required.
           </p>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="card">
-            <h3 className="font-bold">Free</h3>
-            <p className="mt-1 text-sm text-slate-400">Quiz, Polish Score & one full module. Forever.</p>
-          </div>
-          <div className="card">
-            <h3 className="font-bold">Blueprint ₹499</h3>
-            <p className="mt-1 text-sm text-slate-400">One-time full Blueprint, yours to keep.</p>
-          </div>
         </div>
       </section>
 

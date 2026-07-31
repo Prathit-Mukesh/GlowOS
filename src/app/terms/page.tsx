@@ -43,12 +43,17 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2>4. Subscriptions & billing</h2>
-        <ul>
-          <li>Glow Pass: ₹199/month or ₹1,499/year. One-time Blueprint: ₹499. Prices include applicable taxes unless stated.</li>
-          <li>Payments are processed by Razorpay. Subscriptions renew automatically until cancelled in Settings.</li>
-          <li>Refunds are covered by our <a href="/refunds" className="text-violet-soft underline">Refund Policy</a>.</li>
-        </ul>
+        <h2>4. Cost</h2>
+        <p>
+          GlowOS is currently <strong>free for everyone</strong>. There are no paid plans, no
+          subscriptions and no charges of any kind while we are in early access — we do not collect
+          payment details at all.
+        </p>
+        <p>
+          If we introduce paid features in future, we will announce it in advance and never charge
+          an existing account without explicit consent. Anything you have already created remains
+          yours and exportable regardless.
+        </p>
       </section>
 
       <section>

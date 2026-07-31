@@ -6,17 +6,24 @@ import { motion } from "framer-motion";
 import RadarChart from "@/components/radar-chart";
 import { MODULE_META, MODULES, type Module } from "@/lib/quiz-questions";
 import type { Blueprint } from "@/lib/blueprint-rules";
+import AutoUpgrade from "./auto-upgrade";
 
 interface Props {
   scores: Record<Module, number>;
   total: number;
   blueprint: Blueprint;
   unlocked: Module[];
-  isPaid: boolean;
+  needsAiUpgrade: boolean;
 }
 
 /** The signed-in Blueprint reveal: radar, top actions, gated module cards. */
-export default function BlueprintReveal({ scores, total, blueprint, unlocked, isPaid }: Props) {
+export default function BlueprintReveal({
+  scores,
+  total,
+  blueprint,
+  unlocked,
+  needsAiUpgrade,
+}: Props) {
   const [open, setOpen] = useState<Module | null>(null);
 
   const topActions = blueprint.polish_priorities.slice(0, 3).map((p) => {
@@ -26,6 +33,8 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
 
   return (
     <main className="flex flex-col gap-8 pb-16 pt-8">
+      {needsAiUpgrade ? <AutoUpgrade /> : null}
+
       <header className="text-center">
         <p className="text-sm text-slate-400">Your Polish Score</p>
         <motion.p
@@ -80,18 +89,14 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-bold">Your five modules</h2>
-          {!isPaid ? (
-            <Link href="/pricing" className="text-xs font-semibold text-gold-soft">
-              Unlock all →
-            </Link>
-          ) : null}
+          <span className="chip border-teal/40 text-teal-soft">all unlocked · free</span>
         </div>
         {MODULES.map((m) => {
           const mod = blueprint.modules[m];
           const isOpen = open === m;
           const isUnlocked = unlocked.includes(m);
           return (
-            <div key={m} className={`card ${isUnlocked ? "" : "opacity-80"}`}>
+            <div key={m} className="card">
               <button
                 className="flex w-full items-center justify-between text-left"
                 onClick={() => setOpen(isOpen ? null : m)}
@@ -104,11 +109,11 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
                   <span>
                     <span className="font-semibold">{MODULE_META[m].label}</span>
                     <span className="block text-xs text-slate-500">
-                      {isUnlocked ? MODULE_META[m].blurb : "Locked — Glow Pass"}
+                      {MODULE_META[m].blurb}
                     </span>
                   </span>
                 </span>
-                <span className="text-slate-500">{isUnlocked ? (isOpen ? "▾" : "▸") : "🔒"}</span>
+                <span className="text-slate-500">{isOpen ? "▾" : "▸"}</span>
               </button>
 
               {isOpen && isUnlocked ? (
@@ -154,17 +159,6 @@ export default function BlueprintReveal({ scores, total, blueprint, unlocked, is
                 </div>
               ) : null}
 
-              {isOpen && !isUnlocked ? (
-                <div className="mt-4 border-t border-white/5 pt-4 text-center">
-                  <p className="text-sm text-slate-400">
-                    This module is part of <strong className="text-gold-soft">Glow Pass</strong> —
-                    ₹199/mo unlocks all five.
-                  </p>
-                  <Link href="/pricing" className="btn-primary mt-3 w-full">
-                    Unlock everything
-                  </Link>
-                </div>
-              ) : null}
             </div>
           );
         })}

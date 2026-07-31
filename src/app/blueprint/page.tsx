@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import type { Blueprint } from "@/lib/blueprint-rules";
 import type { Module } from "@/lib/quiz-questions";
+import { getEntitlement, unlockedFor } from "@/lib/entitlements";
 import BlueprintReveal from "./reveal";
 import BlueprintTeaser from "./teaser";
 import QuizSync from "./quiz-sync";
@@ -26,7 +27,7 @@ export default async function BlueprintPage() {
     return <BlueprintTeaser />;
   }
 
-  const [{ data: score }, { data: bpRow }, { data: sub }] = await Promise.all([
+  const [{ data: score }, { data: bpRow }, entitlement] = await Promise.all([
     supabase
       .from("polish_scores")
       .select("body, skin, style, mind, voice, total")
@@ -36,18 +37,12 @@ export default async function BlueprintPage() {
       .maybeSingle(),
     supabase
       .from("blueprints")
-      .select("content")
+      .select("content, model_used")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("subscriptions")
-      .select("status, current_period_end")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .limit(1)
-      .maybeSingle(),
+    getEntitlement(supabase, user.id),
   ]);
 
   if (!score || !bpRow) {
@@ -57,13 +52,14 @@ export default async function BlueprintPage() {
   }
 
   const blueprint = bpRow.content as Blueprint;
-  const isPaid =
-    !!sub && (!sub.current_period_end || new Date(sub.current_period_end) > new Date());
-
-  // Free tier: unlock only the user's #1 priority module.
-  const unlocked: Module[] = isPaid
-    ? (["body", "skin", "style", "mind", "voice"] as Module[])
-    : [(blueprint.polish_priorities[0] ?? "mind") as Module];
+  // Everyone gets an AI-personalised plan for free. If the stored plan is
+  // still the instant rules-based one, upgrade it in the background.
+  const needsAiUpgrade = bpRow.model_used === "rules-v1";
+  // GlowOS is free for all — every module is unlocked. See lib/entitlements.
+  const unlocked = unlockedFor(
+    entitlement.hasFullAccess,
+    (blueprint.polish_priorities[0] ?? "mind") as Module
+  );
 
   return (
     <BlueprintReveal
@@ -77,7 +73,7 @@ export default async function BlueprintPage() {
       total={score.total}
       blueprint={blueprint}
       unlocked={unlocked}
-      isPaid={isPaid}
+      needsAiUpgrade={needsAiUpgrade}
     />
   );
 }

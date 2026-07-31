@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { checkLimit } from "@/lib/rate-limit";
 import { generateBlueprint } from "@/lib/ai/generate-blueprint";
+import { getEntitlement } from "@/lib/entitlements";
 
 export const runtime = "nodejs";
 // AI generation can take a while at higher output sizes.
@@ -9,8 +10,8 @@ export const maxDuration = 120;
 
 /**
  * POST /api/ai/blueprint — regenerate the user's Blueprint with the AI brain.
- * Hardening (spec §3/§4): session required; per-user rate limit (10/day free,
- * 30/day paid); regen cap 2/day; browser NEVER talks to the AI provider —
+ * Hardening (spec §3/§4): session required; per-user AI rate limit (30/day,
+ * free for all); regen cap 2/day; browser NEVER talks to the AI provider —
  * only this server route does.
  */
 export async function POST(request: NextRequest) {
@@ -24,19 +25,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Entitlement from the DB, never from the client.
-    const { data: sub } = await supabase
-      .from("subscriptions")
-      .select("status, current_period_end")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .limit(1)
-      .maybeSingle();
-    const isPaid =
-      !!sub && (!sub.current_period_end || new Date(sub.current_period_end) > new Date());
+    // Entitlement from the DB, never from the client (spec §6).
+    const entitlement = await getEntitlement(supabase, user.id);
 
-    // Per-user AI rate limit: 10/day free, 30/day paid.
-    const limit = await checkLimit(isPaid ? "aiPaid" : "aiFree", user.id);
+    // GlowOS is free for all, so everyone gets the generous AI allowance
+    // (30/day) rather than the old free tier's 10/day. The 2-regens-per-day
+    // cap below is the real cost control and applies to everyone equally.
+    const limit = await checkLimit(entitlement.hasFullAccess ? "aiPaid" : "aiFree", user.id);
     if (!limit.ok) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }

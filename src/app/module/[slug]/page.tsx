@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Blueprint } from "@/lib/blueprint-rules";
 import { MODULE_META, MODULES, type Module } from "@/lib/quiz-questions";
+import { getEntitlement } from "@/lib/entitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function ModulePage({ params }: Props) {
   } = await supabase.auth.getUser();
   if (!user) redirect(`/auth?next=/module/${moduleKey}`);
 
-  const [{ data: bpRow }, { data: sub }] = await Promise.all([
+  const [{ data: bpRow }, entitlement] = await Promise.all([
     supabase
       .from("blueprints")
       .select("content")
@@ -42,42 +43,17 @@ export default async function ModulePage({ params }: Props) {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("subscriptions")
-      .select("status, current_period_end")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .limit(1)
-      .maybeSingle(),
+    getEntitlement(supabase, user.id),
   ]);
 
   if (!bpRow) redirect("/blueprint");
 
   const blueprint = bpRow.content as Blueprint;
-  const isPaid =
-    !!sub && (!sub.current_period_end || new Date(sub.current_period_end) > new Date());
-  const unlockedModule = (blueprint.polish_priorities[0] ?? "mind") as Module;
 
-  if (!isPaid && moduleKey !== unlockedModule) {
-    // Free tier: only the top-priority module is unlocked.
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-5 text-center">
-        <p className="text-5xl" aria-hidden>
-          🔒
-        </p>
-        <h1 className="text-2xl font-bold">{MODULE_META[moduleKey].label} is a Glow Pass module</h1>
-        <p className="max-w-xs text-sm text-slate-400">
-          Your free plan includes <strong>{MODULE_META[unlockedModule].label}</strong>. Glow Pass
-          (₹199/mo) unlocks all five modules.
-        </p>
-        <Link href="/pricing" className="btn-primary w-full">
-          Unlock everything
-        </Link>
-        <Link href="/blueprint" className="btn-ghost w-full">
-          Back to Blueprint
-        </Link>
-      </main>
-    );
+  // GlowOS is free for all — every module is open to every signed-in user.
+  // If paid tiers return, lib/entitlements is the only file that changes.
+  if (!entitlement.unlockedModules.includes(moduleKey)) {
+    redirect("/blueprint");
   }
 
   const mod = blueprint.modules[moduleKey];
