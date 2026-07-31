@@ -12,12 +12,25 @@ function safeNext(raw: string | null): string {
 }
 
 /**
+ * The public origin of this request. Behind Vercel's proxy `request.url` can
+ * carry an internal host, which would redirect the user somewhere they can't
+ * reach — prefer the forwarded headers the proxy sets.
+ */
+function publicOrigin(request: NextRequest): string {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!host) return new URL(request.url).origin;
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  return `${proto}://${host}`;
+}
+
+/**
  * GET /auth/callback — exchanges the magic-link / OAuth code for a session
  * (httpOnly cookies), stamps the 18+ age gate on first sign-in, audits the
  * login, and redirects onward.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  const origin = publicOrigin(request);
   const code = searchParams.get("code");
   const next = safeNext(searchParams.get("next"));
 

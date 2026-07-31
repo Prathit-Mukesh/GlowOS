@@ -22,8 +22,21 @@ export default function AuthForm() {
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
-  const redirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`;
+  /**
+   * Build the callback URL from the origin the user is ACTUALLY on, not from a
+   * build-time env var — a stale NEXT_PUBLIC_SITE_URL (e.g. the localhost
+   * default) sends every magic link to a host the user's device can't reach.
+   * Computed at click time, so `window` is always available. Preview
+   * deployments work too. Supabase still validates this against its Redirect
+   * URLs allowlist server-side, so this is not an open-redirect surface.
+   */
+  function callbackUrl(): string {
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : (process.env.NEXT_PUBLIC_SITE_URL ?? "");
+    return `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  }
 
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
@@ -43,7 +56,7 @@ export default function AuthForm() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email: parsed.data,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: callbackUrl() },
     });
     if (error) {
       // Generic message — never reveal whether the account exists.
@@ -64,7 +77,7 @@ export default function AuthForm() {
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo },
+      options: { redirectTo: callbackUrl() },
     });
   }
 
